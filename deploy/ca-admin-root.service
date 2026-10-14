@@ -1,0 +1,65 @@
+# 正式安装使用 deploy/install.sh --systemd --loopback（项目须在 /opt 下）。
+[Unit]
+Description=CA 证书管理系统（strongSwan 证书签发与 CRL 自动化，root + 沙箱）
+Documentation=file:__BASE_DIR__/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=__BASE_DIR__
+Environment=CA_HOST=__HOST__
+Environment=CA_PORT=__PORT__
+Environment="CA_DATA_DIR=__DATA_DIR__"
+Environment=CA_TLS=off
+Environment=CA_MANAGE_STRONGSWAN=1
+ExecStart="__BASE_DIR__/.venv/bin/python" -m backend.server
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ca-admin
+UMask=0077
+
+# 正式服务安装在 /opt；家目录保持不可访问，不从其中绑定项目。
+ProtectHome=yes
+# 可选敏感路径不存在时不应导致 226/NAMESPACE；不使用路径通配符。
+InaccessiblePaths=-/etc/shadow -/etc/gshadow
+
+# ---- 文件系统：其余只读，仅下列路径可写 ----
+ProtectSystem=strict
+ReadWritePaths="__DATA_DIR__"
+ReadWritePaths=/etc/swanctl
+# legacy ipsec.d 布局（仅当该目录存在时生效；- 前缀表示不存在则忽略）
+ReadWritePaths=-/etc/ipsec.d
+ReadWritePaths=/run
+PrivateTmp=yes
+PrivateDevices=no
+NoNewPrivileges=yes
+
+# ---- 内核与进程视图 ----
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# ---- 最小能力集：写文件 / 改属主 / 改权限 / 读文件 ----
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_DAC_READ_SEARCH
+
+[Install]
+WantedBy=multi-user.target

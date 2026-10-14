@@ -1,0 +1,14 @@
+# 监听 CA 系统的发布暂存目录：一有变化就同步给 strongSwan
+#
+# 这就是「CRL 自动化」闭环的最后一环：
+#   吊销/到期 → 管理服务重新生成 CRL 并原子写入暂存目录
+#             → 本 path 单元触发 → 同步进 /etc/swanctl → swanctl --flush-certs + --load-creds
+[Unit]
+Description=监听 CA 发布暂存目录变化（触发 strongSwan 同步）
+
+[Path]
+PathChanged=__STAGING__
+Unit=ca-strongswan-sync.service
+
+[Install]
+WantedBy=multi-user.target

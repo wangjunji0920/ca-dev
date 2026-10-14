@@ -1,0 +1,11 @@
+# 暂存目录变化时自动同步 CRL/CA 给 strongSwan（由 root 执行）
+[Unit]
+Description=同步 CA 管理系统的 CRL/CA 给 strongSwan
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ca-strongswan-sync.sh
+# 同步脚本本身要写 /etc/swanctl 并调用 swanctl，因此以 root 运行
+User=root
+Nice=5

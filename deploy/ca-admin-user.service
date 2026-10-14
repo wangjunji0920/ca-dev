@@ -1,0 +1,24 @@
+# CA 证书管理系统（systemd 用户级服务，无需 root）
+#
+# 安装： mkdir -p ~/.config/systemd/user
+#        cp deploy/ca-admin-user.service ~/.config/systemd/user/ca-admin.service
+#        systemctl --user daemon-reload && systemctl --user enable --now ca-admin
+#        loginctl enable-linger "$USER"     # 让服务在未登录时也运行（需要 root 执行一次）
+#
+# 用户级服务无法写 /etc/swanctl，请配合 root 的 ca-strongswan-sync.* 使用。
+[Unit]
+Description=CA 证书管理系统（用户级）
+
+[Service]
+Type=simple
+WorkingDirectory=__BASE_DIR__
+Environment=CA_HOST=__HOST__
+Environment=CA_PORT=__PORT__
+Environment="CA_DATA_DIR=__DATA_DIR__"
+Environment=CA_TLS=off
+ExecStart="__BASE_DIR__/.venv/bin/python" -m backend.server
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

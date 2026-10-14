@@ -1,0 +1,62 @@
+name: Release check
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python3 -m venv .venv
+      - run: .venv/bin/python -m pip install -r requirements.txt
+      - run: npm install --prefix .tmp/fe-test --no-audit --no-fund jsdom@26.1.0
+      - run: bash tests/run_all.sh --release
+      - run: bash deploy/package.sh --out dist/ca-dev-github-public.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-under-test
+          path: dist/ca-dev-github-public.zip
+          if-no-files-found: error
+  native:
+    needs: regression
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-under-test
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y python3-venv charon-systemd strongswan-swanctl unzip
+      - run: sudo unzip -q ca-dev-github-public.zip -d /opt
+      - run: sudo mv /opt/ca-dev-github-public /opt/ca-dev
+      - run: sudo chown -R root:root /opt/ca-dev
+      - run: sudo chmod -R go-w /opt/ca-dev
+      - run: cd /opt/ca-dev && sha256sum -c SHA256SUMS
+      - run: sudo systemctl enable --now strongswan
+      - run: sudo bash /opt/ca-dev/deploy/install.sh --systemd --loopback --pip-mirror pypi
+      - run: sudo /opt/ca-dev/.venv/bin/python /opt/ca-dev/tests/native_systemd_e2e.py --disposable-vm
+      - if: failure()
+        run: sudo journalctl -u ca-admin -u strongswan -b -n 100 --no-pager
+  verified-package:
+    needs: [regression, native]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-under-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ca-dev-verified
+          path: ca-dev-github-public.zip
+          if-no-files-found: error

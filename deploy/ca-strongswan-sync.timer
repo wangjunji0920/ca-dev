@@ -1,0 +1,11 @@
+# 兜底：即使没触发 path 单元（例如目录被整体替换），也定期同步一次
+[Unit]
+Description=定期同步 CRL/CA 给 strongSwan（兜底）
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

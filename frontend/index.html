@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<!--
+  CA 证书管理系统 — 前端单页应用（无构建步骤，纯原生 ES2020+）
+  ------------------------------------------------------------------
+  文件清单（只能改这几个文件，全部位于 frontend/ 下）：
+    index.html   本文件：SPA 外壳 + 所有页面的静态骨架（用 JS 切换显示）
+    login.html   登录页
+    style.css    全部样式（浅色 + .dark 深色模式 + 响应式）
+    app.js       全部逻辑：state + renderXxx() + 事件委托 + API 封装
+    favicon.svg  内联 SVG 图标（本地文件，无外链）
+
+  设计约定：
+    · 左侧固定侧边栏导航，右侧主内容区；窄屏（<900px）侧边栏收起为抽屉。
+    · 危险操作（吊销 / 恢复吊销 / 删除 / 覆盖式导入 / 恢复备份）一律二次确认，
+      确认框会显示影响面（对象、序列号、后果说明）。
+    · 指纹 / 序列号 用等宽字体 .mono 展示。
+    · 所有交互文案为简体中文。
+  接口契约见 frontend/app.js 顶部注释。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CA 证书管理系统</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="theme-boot.js"></script>
+</head>
+<body>
+
+<div id="app" class="app" hidden>
+
+  <!-- ============================ 侧边栏 ============================ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+        <path fill="currentColor" d="M12 1.6 3.6 5v6.4c0 5.2 3.6 9.6 8.4 11 4.8-1.4 8.4-5.8 8.4-11V5L12 1.6Zm0 2.2 6.4 2.6v5c0 4.1-2.7 7.7-6.4 8.9-3.7-1.2-6.4-4.8-6.4-8.9v-5L12 3.8Zm-.9 3.6v4.1L8 13.6l1.1 1.6 3.9-2.7V7.4h-1.9Z"/>
+      </svg>
+      <div class="brand-text">
+        <strong>CA 证书管理系统</strong>
+        <span id="brandOrg" class="muted small">—</span>
+      </div>
+    </div>
+
+    <nav class="nav" id="sidebarNav">
+      <a class="nav-item" href="#/dashboard" data-route="#/dashboard">
+        <span class="nav-ico" aria-hidden="true">▦</span><span>概览</span>
+      </a>
+      <a class="nav-item" href="#/certs" data-route="#/certs">
+        <span class="nav-ico" aria-hidden="true">▤</span><span>证书列表</span>
+      </a>
+      <a class="nav-item" href="#/issue" data-route="#/issue">
+        <span class="nav-ico" aria-hidden="true">＋</span><span>签发证书</span>
+      </a>
+      <a class="nav-item" href="#/batch" data-route="#/batch">
+        <span class="nav-ico" aria-hidden="true">≡</span><span>批量签发</span>
+      </a>
+      <a class="nav-item" href="#/csrs" data-route="#/csrs">
+        <span class="nav-ico" aria-hidden="true">✎</span><span>CSR 证书请求</span>
+      </a>
+      <a class="nav-item" href="#/rulesets" data-route="#/rulesets">
+        <span class="nav-ico" aria-hidden="true">⚖</span><span>规则集</span>
+      </a>
+      <a class="nav-item" href="#/revocation" data-route="#/revocation">
+        <span class="nav-ico" aria-hidden="true">⊘</span><span>吊销与 CRL</span>
+      </a>
+      <a class="nav-item" href="#/publish" data-route="#/publish">
+        <span class="nav-ico" aria-hidden="true">⇪</span><span>CRL 自动发布</span>
+      </a>
+      <a class="nav-item" href="#/automation" data-route="#/automation">
+        <span class="nav-ico" aria-hidden="true">⟳</span><span>自动化</span>
+      </a>
+      <a class="nav-item" href="#/import" data-route="#/import">
+        <span class="nav-ico" aria-hidden="true">↧</span><span>导入数据</span>
+      </a>
+      <a class="nav-item" href="#/consistency" data-route="#/consistency">
+        <span class="nav-ico" aria-hidden="true">✓</span><span>一致性体检</span>
+      </a>
+      <a class="nav-item" href="#/audit" data-route="#/audit">
+        <span class="nav-ico" aria-hidden="true">☰</span><span>审计日志</span>
+      </a>
+      <a class="nav-item" href="#/ca" data-route="#/ca">
+        <span class="nav-ico" aria-hidden="true">⚿</span><span>CA 管理</span>
+      </a>
+      <a class="nav-item" href="#/settings" data-route="#/settings">
+        <span class="nav-ico" aria-hidden="true">⚙</span><span>设置</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="sidebar-user">
+        <span class="dot" id="healthDot" title="服务状态"></span>
+        <span id="sidebarUser" class="mono">—</span>
+      </div>
+      <div class="sidebar-user" id="secState" hidden>
+        <span class="dot ok" title="加密信道已建立"></span>
+        <span class="muted small">信道</span>
+        <span id="secFingerprint" class="mono small" title="服务端加密信道指纹">—</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btnTheme" type="button" title="切换深色模式">◐ 深色模式</button>
+      <button class="btn btn-ghost btn-sm" id="btnLogout" type="button">退出登录</button>
+    </div>
+  </aside>
+  <div class="sidebar-mask" id="sidebarMask"></div>
+
+  <!-- ============================ 主内容区 ============================ -->
+  <main class="main">
+    <header class="topbar">
+      <button class="btn btn-ghost btn-icon only-narrow" id="btnSidebar" type="button" aria-label="菜单">☰</button>
+      <h1 class="page-title" id="pageTitle">概览</h1>
+      <div class="topbar-right" id="topbarActions"></div>
+    </header>
+
+    <!-- 加密信道建立失败 / 指纹不匹配告警 -->
+    <div class="banner banner-danger" id="secErrorBanner" hidden>
+      <span class="banner-ico" aria-hidden="true">!</span>
+      <div class="banner-body" id="secErrorBody"></div>
+      <div class="row" id="secErrorActions"></div>
+    </div>
+
+    <!-- 全局 CA 私钥缺失提示（所有页面可见） -->
+    <div class="banner banner-warn" id="caWarnBanner" hidden>
+      <span class="banner-ico" aria-hidden="true">!</span>
+      <div class="banner-body">
+        <strong>当前 CA 未导入私钥：无法签发证书，也无法生成 CRL。</strong>
+        <span class="muted">请前往「CA 管理」导入私钥（或重新导入带私钥的 CA）。</span>
+      </div>
+      <a class="btn btn-warn btn-sm" href="#/ca">前往 CA 管理</a>
+    </div>
+    <div class="banner banner-warn" id="noCaBanner" hidden>
+      <span class="banner-ico" aria-hidden="true">!</span>
+      <div class="banner-body">
+        <strong>尚未导入 CA 证书。</strong>
+        <span class="muted">导入 CA（证书 + 私钥）后即可签发证书与管理 CRL。</span>
+      </div>
+      <a class="btn btn-warn btn-sm" href="#/ca">导入 CA</a>
+    </div>
+
+    <div class="content" id="viewRoot">
+
+      <!-- ---------------------------- 概览 ---------------------------- -->
+      <section class="view" data-view="dashboard" hidden>
+        <div id="dashStats" class="stat-grid"></div>
+
+        <div class="grid-2">
+          <div class="card" id="dashCaCard">
+            <div class="card-head"><h2>CA 状态</h2></div>
+            <div class="card-body" id="dashCaBody">
+              <div class="skeleton sk-line"></div>
+              <div class="skeleton sk-line short"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>按用途分布</h2></div>
+            <div class="card-body" id="dashProfiles">
+              <div class="skeleton sk-line"></div>
+              <div class="skeleton sk-line short"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h2>最近操作</h2>
+              <a class="btn btn-ghost btn-sm" href="#/audit">查看全部审计日志</a>
+            </div>
+            <div class="card-body no-pad">
+              <div class="table-wrap" id="dashRecent"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>即将到期 Top 10</h2>
+              <a class="btn btn-ghost btn-sm" href="#/certs?expires_before=90d">查看全部</a>
+            </div>
+            <div class="card-body no-pad">
+              <div class="table-wrap" id="dashExpiring"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 证书列表 -------------------------- -->
+      <section class="view" data-view="certs" hidden>
+        <div class="toolbar">
+          <div class="field-inline grow">
+            <label class="sr-only" for="certQ">搜索</label>
+            <input id="certQ" class="input" type="search" placeholder="搜索 CN / 序列号 / 指纹 / SAN（回车搜索）" autocomplete="off">
+          </div>
+          <select id="certStatus" class="input" aria-label="状态筛选">
+            <option value="">全部状态</option>
+            <option value="valid">有效</option>
+            <option value="revoked">已吊销</option>
+            <option value="expired">已过期</option>
+            <option value="archived">已归档</option>
+          </select>
+          <select id="certProfile" class="input" aria-label="用途筛选"><option value="">全部用途</option></select>
+          <select id="certTag" class="input" aria-label="标签筛选"><option value="">全部标签</option></select>
+          <select id="certExpires" class="input" aria-label="到期区间筛选">
+            <option value="">到期时间不限</option>
+            <option value="expired">已过期</option>
+            <option value="30d">30 天内到期</option>
+            <option value="90d">90 天内到期</option>
+            <option value="365d">365 天内到期</option>
+          </select>
+          <input id="certIssuer" class="input" type="search" placeholder="签发者" aria-label="签发者筛选">
+          <select id="certSort" class="input" aria-label="排序">
+            <option value="created_at:desc">按创建时间 ↓</option>
+            <option value="created_at:asc">按创建时间 ↑</option>
+            <option value="not_after:asc">按到期时间 ↑</option>
+            <option value="not_after:desc">按到期时间 ↓</option>
+            <option value="cn:asc">按 CN ↑</option>
+            <option value="cn:desc">按 CN ↓</option>
+            <option value="serial_hex:asc">按序列号 ↑</option>
+            <option value="status:asc">按状态 ↑</option>
+          </select>
+          <select id="certPageSize" class="input" aria-label="每页条数">
+            <option value="20">每页 20</option>
+            <option value="50">每页 50</option>
+            <option value="100">每页 100</option>
+          </select>
+          <button class="btn btn-ghost" id="certReset" type="button">重置</button>
+          <span class="spacer"></span>
+          <a class="btn btn-primary" href="#/issue">＋ 签发新证书</a>
+          <a class="btn" href="#/import">批量导入</a>
+          <div class="dropdown">
+            <button class="btn" id="certExportBtn" type="button">导出 ▾</button>
+            <div class="dropdown-menu">
+              <button type="button" data-export="csv">导出 CSV</button>
+              <button type="button" data-export="json">导出 JSON</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body no-pad">
+            <div class="table-wrap" id="certTableWrap"></div>
+          </div>
+          <div class="card-foot pager" id="certPager"></div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 证书详情 -------------------------- -->
+      <section class="view" data-view="cert-detail" hidden>
+        <div class="crumb">
+          <a href="#/certs">← 返回证书列表</a>
+          <span class="spacer"></span>
+          <div id="detailActions" class="detail-actions"></div>
+        </div>
+        <div id="detailBody"></div>
+      </section>
+
+      <!-- -------------------------- 签发证书 -------------------------- -->
+      <section class="view" data-view="issue" hidden>
+        <div class="tabs" id="issueModeTabs">
+          <button class="tab active" type="button" data-issue-mode="generate">系统生成密钥</button>
+          <button class="tab" type="button" data-issue-mode="csr">上传 CSR</button>
+        </div>
+
+        <form id="issueForm" novalidate autocomplete="off">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head"><h2>基本信息</h2></div>
+              <div class="card-body form-grid">
+                <div class="field">
+                  <label for="issProfile">用途模板 *</label>
+                  <select id="issProfile" class="input"></select>
+                  <div class="hint" id="issProfileHint"></div>
+                </div>
+                <div class="field">
+                  <label for="issCn">通用名 CN *</label>
+                  <input id="issCn" class="input" placeholder="例如 server.example.com" autocomplete="off">
+                  <div class="err" id="err-issCn"></div>
+                </div>
+                <div class="field">
+                  <label for="issO">组织 O</label>
+                  <input id="issO" class="input" placeholder="例如 示例科技有限公司">
+                </div>
+                <div class="field">
+                  <label for="issOu">部门 OU</label>
+                  <input id="issOu" class="input" placeholder="例如 IT 运维部">
+                </div>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="issC">国家 C</label>
+                    <input id="issC" class="input" placeholder="CN" maxlength="2">
+                  </div>
+                  <div class="field">
+                    <label for="issSt">省/州 ST</label>
+                    <input id="issSt" class="input">
+                  </div>
+                  <div class="field">
+                    <label for="issL">城市 L</label>
+                    <input id="issL" class="input">
+                  </div>
+                </div>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="issValidity">有效期（天）*</label>
+                    <input id="issValidity" class="input" type="number" min="1" max="3650" value="365">
+                    <div class="err" id="err-issValidity"></div>
+                  </div>
+                  <div class="field" id="wrapSerialMode">
+                    <label for="issSerialMode">序列号模式</label>
+                    <select id="issSerialMode" class="input">
+                      <option value="random">随机</option>
+                      <option value="sequential">顺序</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" id="keyCard">
+              <div class="card-head"><h2>密钥</h2></div>
+              <div class="card-body form-grid">
+                <div class="field">
+                  <label for="issKeyType">密钥算法</label>
+                  <select id="issKeyType" class="input">
+                    <option value="rsa">RSA</option>
+                    <option value="ec">EC（椭圆曲线）</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="issKeySize">密钥长度 / 曲线</label>
+                  <select id="issKeySize" class="input"></select>
+                </div>
+                <p class="muted small">系统生成密钥时，私钥仅在签发成功后显示一次，请立即下载保存。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" id="csrCard" hidden>
+            <div class="card-head"><h2>上传 CSR</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="issCsrFile">CSR 文件（.pem/.csr/.der）</label>
+                <input id="issCsrFile" class="input" type="file" accept=".pem,.csr,.der,.txt">
+              </div>
+              <div class="field">
+                <label for="issCsrText">或粘贴 CSR PEM</label>
+                <textarea id="issCsrText" class="input mono" rows="6" placeholder="-----BEGIN CERTIFICATE REQUEST-----"></textarea>
+              </div>
+              <div class="row">
+                <button class="btn" id="issCsrParse" type="button">解析 CSR</button>
+                <span class="muted small">解析成功后将展示 CSR 中的主题与 SAN；提交时以 CSR 内容为准，不返回私钥。</span>
+              </div>
+              <div id="issCsrResult" class="callout" hidden></div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head">
+                <h2>SAN 主体备用名</h2>
+                <button class="btn btn-sm" id="issAddSan" type="button">＋ 添加一行</button>
+              </div>
+              <div class="card-body">
+                <div id="issSanRows" class="san-rows"></div>
+                <p class="muted small">支持 DNS / IP / Email / UPN / URI。DNS 支持通配符（如 *.example.com）。</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><h2>扩展</h2></div>
+              <div class="card-body">
+                <div class="field">
+                  <label>KeyUsage（密钥用途）</label>
+                  <div class="checks" id="issKeyUsage"></div>
+                </div>
+                <div class="field">
+                  <label>ExtendedKeyUsage（扩展密钥用途）</label>
+                  <div class="checks" id="issEku"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>元数据</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="issOwner">所有者</label>
+                <input id="issOwner" class="input" placeholder="例如 张三 / 支付平台组">
+              </div>
+              <div class="field">
+                <label for="issTags">标签（逗号分隔）</label>
+                <input id="issTags" class="input" placeholder="例如 prod,payment">
+              </div>
+              <div class="field full">
+                <label for="issNotes">备注</label>
+                <textarea id="issNotes" class="input" rows="2"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>预览确认</h2>
+              <button class="btn btn-sm" id="issPreviewBtn" type="button">刷新预览</button>
+            </div>
+            <div class="card-body" id="issPreview">
+              <p class="muted">点击「刷新预览」查看将要签发的字段。</p>
+            </div>
+            <div class="card-foot row">
+              <button class="btn btn-primary" id="issSubmit" type="button">确认签发</button>
+              <button class="btn btn-ghost" id="issResetForm" type="button">清空表单</button>
+              <span class="muted small" id="issSubmitHint"></span>
+            </div>
+          </div>
+        </form>
+
+        <div class="card" id="issueResultCard" hidden>
+          <div class="card-head">
+            <h2>签发结果</h2>
+            <button class="btn btn-sm btn-ghost" id="issResultClose" type="button">关闭</button>
+          </div>
+          <div class="card-body" id="issueResult"></div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 批量签发 -------------------------- -->
+      <section class="view" data-view="batch" hidden>
+        <div class="card">
+          <div class="card-head"><h2>批量签发（CSV）</h2></div>
+          <div class="card-body form-grid">
+            <div class="field full">
+              <label for="batchCsv">粘贴 CSV（表头：cn,o,ou,c,san_dns,san_ip,email,upn,validity_days,profile）</label>
+              <textarea id="batchCsv" class="input mono" rows="10" placeholder="cn,o,ou,c,san_dns,san_ip,email,upn,validity_days,profile
+web01.example.com,示例科技,运维,CN,web01.example.com,,,ops@example.com,365,server
+vpn.example.com,示例科技,运维,CN,vpn.example.com,,,vpn@example.com,365,server"></textarea>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="batchFile">或上传 CSV 文件</label>
+                <input id="batchFile" class="input" type="file" accept=".csv,text/csv">
+              </div>
+              <div class="field">
+                <label for="batchOwner">统一所有者（可空）</label>
+                <input id="batchOwner" class="input">
+              </div>
+            </div>
+            <div class="row">
+              <label class="check"><input type="checkbox" id="batchDemo" checked> 第一行是表头（跳过）</label>
+            </div>
+          </div>
+          <div class="card-foot row">
+            <button class="btn" id="batchPrecheck" type="button">预检</button>
+            <button class="btn btn-primary" id="batchSubmit" type="button" disabled>确认签发</button>
+            <span class="muted small" id="batchHint">先预检，确认每行解析结果后再签发。</span>
+          </div>
+        </div>
+
+        <div class="card" id="batchPreviewCard" hidden>
+          <div class="card-head"><h2>预检结果</h2><span class="badge" id="batchPreviewStat"></span></div>
+          <div class="card-body no-pad"><div class="table-wrap" id="batchPreview"></div></div>
+        </div>
+
+        <div class="card" id="batchResultCard" hidden>
+          <div class="card-head"><h2>签发结果</h2><span class="badge" id="batchResultStat"></span></div>
+          <div class="card-body no-pad"><div class="table-wrap" id="batchResult"></div></div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 吊销与 CRL -------------------------- -->
+      <section class="view" data-view="csrs" hidden>
+        <div class="toolbar">
+          <div class="field-inline">
+            <label for="csrStatus">状态</label>
+            <select id="csrStatus" class="input">
+              <option value="">全部</option>
+              <option value="pending">待签发</option>
+              <option value="issued">已签发</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+          </div>
+          <div class="field-inline">
+            <label for="csrQ">搜索</label>
+            <input id="csrQ" class="input" type="search" placeholder="CN / 主体 / 所有者 / 备注">
+          </div>
+          <span class="spacer"></span>
+          <button class="btn btn-ghost" type="button" data-act="csr-refresh">刷新</button>
+          <button class="btn" type="button" data-act="csr-dir">从目录导入</button>
+          <button class="btn btn-primary" type="button" id="csrPick" data-act="csr-pick">＋ 导入 CSR</button>
+          <input id="csrFiles" type="file" multiple accept=".csr,.req,.p10,.pem,.zip" hidden>
+        </div>
+
+        <div class="callout small">
+          CSR 由申请方<strong>自己生成密钥</strong>后提交，私钥不经过本系统。导入后先<strong>预检</strong>，
+          确认无误再入库；签发时按<strong>规则集</strong>套用扩展与策略（含 CRL 分发点），与直接签发完全一致。
+          同一公钥只会入库一次；已签发的请求默认不能重复签发。
+        </div>
+
+        <div class="card" id="csrPreviewCard" hidden>
+          <div class="card-head"><h2>导入预检</h2><span class="muted small">确认后才会写入请求池</span></div>
+          <div class="card-body no-pad"><div class="table-wrap" id="csrPreview"></div></div>
+          <div class="card-body" style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" type="button" data-act="csr-preview-cancel">取消</button>
+            <button class="btn btn-primary" type="button" id="csrImportDo" data-act="csr-import-do">确认导入</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>证书请求池</h2><span id="csrStats" class="muted small">—</span></div>
+          <div class="card-body no-pad"><div class="table-wrap" id="csrTable"></div></div>
+          <div class="pager" id="csrPager"></div>
+        </div>
+      </section>
+
+      <section class="view" data-view="revocation" hidden>
+        <div class="split">
+          <div class="card">
+            <div class="card-head"><h2>吊销证书</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="revSearch">搜索证书（CN / 序列号 / 指纹）</label>
+                <div class="row">
+                  <input id="revSearch" class="input grow" placeholder="输入关键词后回车">
+                  <button class="btn" id="revSearchBtn" type="button">搜索</button>
+                </div>
+              </div>
+              <div id="revSearchResult"></div>
+              <div class="field">
+                <label for="revReason">吊销原因 *</label>
+                <select id="revReason" class="input">
+                  <option value="unspecified">unspecified（未指定）</option>
+                  <option value="keyCompromise">keyCompromise（密钥泄露）</option>
+                  <option value="cACompromise">cACompromise（CA 泄露）</option>
+                  <option value="affiliationChanged">affiliationChanged（隶属关系变更）</option>
+                  <option value="superseded">superseded（已被取代）</option>
+                  <option value="cessationOfOperation">cessationOfOperation（停止使用）</option>
+                  <option value="certificateHold">certificateHold（证书挂起）</option>
+                  <option value="privilegeWithdrawn">privilegeWithdrawn（权限撤销）</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="revDate">吊销时间（ISO8601，留空为当前时间）</label>
+                <input id="revDate" class="input mono" placeholder="2026-01-01T00:00:00+08:00">
+              </div>
+              <div class="field">
+                <label for="revNotes">吊销备注</label>
+                <textarea id="revNotes" class="input" rows="2"></textarea>
+              </div>
+              <div class="row">
+                <button class="btn btn-danger" id="revSubmit" type="button" disabled>吊销所选证书</button>
+                <button class="btn" id="revUnrevoke" type="button" disabled>恢复吊销（证书挂起解除）</button>
+              </div>
+              <div class="callout callout-danger small">
+                吊销不可逆（恢复吊销仅适用于 certificateHold 状态，且属于审计关键操作）。吊销后将影响证书校验结果，请确认影响面。
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>当前 CRL</h2>
+              <button class="btn btn-sm btn-ghost" id="crlRefresh" type="button">刷新</button>
+            </div>
+            <div class="card-body" id="crlInfo">
+              <div class="skeleton sk-line"></div>
+              <div class="skeleton sk-line short"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>生成 CRL</h2></div>
+          <div class="card-body form-grid">
+            <div class="field-row">
+              <div class="field">
+                <label for="crlValidity">本次 CRL 有效期（天）</label>
+                <input id="crlValidity" class="input" type="number" min="1" max="3650" value="7">
+              </div>
+              <div class="field">
+                <label for="crlNextUpdate">下次更新时间（天）</label>
+                <input id="crlNextUpdate" class="input" type="number" min="1" max="3650" placeholder="留空按默认设置">
+              </div>
+              <div class="field">
+                <label for="crlDigest">摘要算法</label>
+                <select id="crlDigest" class="input">
+                  <option value="sha256">SHA-256</option>
+                  <option value="sha384">SHA-384</option>
+                  <option value="sha512">SHA-512</option>
+                  <option value="sha1">SHA-1（兼容旧系统，不推荐）</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="crlForce"> 强制重新生成（即使无吊销变更）</label>
+              </div>
+            </div>
+            <div class="row">
+              <button class="btn btn-primary" id="crlGenerate" type="button">生成 CRL</button>
+              <button class="btn" id="crlDownloadPem" type="button">下载 PEM</button>
+              <button class="btn" id="crlDownloadDer" type="button">下载 DER</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>吊销条目</h2><span class="badge" id="crlRevokedCount"></span></div>
+            <div class="card-body no-pad"><div class="table-wrap" id="crlRevoked"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>导入 CRL 同步吊销状态</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="crlImportFile">CRL 文件（.crl/.pem/.der）</label>
+                <input id="crlImportFile" class="input" type="file" accept=".crl,.pem,.der,.txt">
+              </div>
+              <div class="row">
+                <button class="btn" id="crlImportBtn" type="button">导入并同步</button>
+              </div>
+              <div class="callout small">
+                导入后，本地数据库中与此 CRL 序列号匹配的证书将被标记为「已吊销」。导入前会先展示将被标记的证书清单供确认。
+              </div>
+              <div id="crlImportResult"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------- 规则集 ---------------------------- -->
+      <section class="view" data-view="rulesets" hidden>
+        <!-- 列表视图 -->
+        <div id="rsListView">
+          <div class="toolbar">
+            <div class="field-inline">
+              <label for="rsDefault">默认规则集</label>
+              <select id="rsDefault" class="input"></select>
+            </div>
+            <button class="btn" type="button" data-act="rs-default-pick">设为默认</button>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost" type="button" data-act="rs-refresh">刷新</button>
+            <button class="btn btn-primary" type="button" data-act="rs-new">＋ 新建规则集</button>
+          </div>
+
+          <div class="callout small">
+            「证书怎么签」在这里全部是可编辑的数据。strongSwan 用证书 <strong>SAN</strong> 匹配 IKEv2 身份
+            （<span class="mono">local.id / eap_id</span>），所以 VPN 类规则集的 SAN 策略很关键；
+            <strong>修改规则集只影响之后签发的证书</strong>，已签发证书不受影响。
+          </div>
+
+          <div class="card">
+            <div class="card-body no-pad"><div class="table-wrap" id="rsTable"></div></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>平台差异提示</h2><span class="muted small">点击表格中的规则集名称查看</span></div>
+            <div class="card-body" id="rsPlatformNotes">
+              <div class="skeleton sk-line"></div>
+              <div class="skeleton sk-line short"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 编辑视图 -->
+        <div id="rsEditorView" hidden>
+          <div class="crumb">
+            <button class="btn btn-ghost btn-sm" type="button" data-act="rs-close-editor">← 返回规则集列表</button>
+            <span class="spacer"></span>
+            <span class="muted small" id="rsEditorTitle"></span>
+            <button class="btn" type="button" data-act="rs-validate">校验</button>
+            <button class="btn btn-ghost" type="button" data-act="rs-close-editor">取消</button>
+            <button class="btn btn-primary" type="button" id="rsSaveBtn" data-act="rs-save">保存规则集</button>
+          </div>
+          <div id="rsFormErrors"></div>
+          <form id="rsForm" novalidate autocomplete="off"></form>
+        </div>
+      </section>
+
+      <!-- ------------------------ CRL 自动发布 ------------------------ -->
+      <section class="view" data-view="publish" hidden>
+        <div class="stat-grid" id="pubStats"></div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>CRL 健康状态</h2>
+            <span id="pubHealthBadge"></span>
+            <button class="btn btn-sm btn-ghost" type="button" data-act="pub-refresh">刷新</button>
+          </div>
+          <div class="card-body" id="pubHealthBody">
+            <div class="skeleton sk-line"></div>
+            <div class="skeleton sk-line short"></div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>自动发布设置</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label class="check"><input type="checkbox" id="pubAutoPublish"> 启用自动发布（auto_publish）</label>
+                <div class="hint">系统会在 CRL 的 <span class="mono">nextUpdate</span> 到期前 <span class="mono">lead_hours</span> 小时自动重新生成并发布，strongSwan 永远不会拿到过期 CRL。</div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="pubLeadHours">提前小时数 lead_hours</label>
+                  <input id="pubLeadHours" class="input" type="number" min="1" max="8760">
+                </div>
+                <div class="field">
+                  <label for="pubIntervalMinutes">检查间隔（分钟）</label>
+                  <input id="pubIntervalMinutes" class="input" type="number" min="1" max="1440">
+                </div>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="pubAutoReload"> 写入后自动重载 strongSwan（auto_reload）</label>
+              </div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn btn-primary" id="pubAutoSave" type="button" data-act="pub-auto-save">保存自动发布设置</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>立即操作</h2></div>
+            <div class="card-body">
+              <div class="row">
+                <button class="btn btn-primary" id="pubNowBtn" type="button" data-act="pub-now">立即重新生成并发布</button>
+                <button class="btn" type="button" data-act="pub-dl" data-format="pem">下载 CRL（PEM）</button>
+                <button class="btn" type="button" data-act="pub-dl" data-format="der">下载 CRL（DER）</button>
+              </div>
+              <div class="field" style="margin-top:10px">
+                <label>公开 CRL（CDP）地址</label>
+                <div class="row">
+                  <input id="pubCdp" class="input mono grow" readonly>
+                  <button class="btn" type="button" data-act="pub-copy-cdp">复制</button>
+                </div>
+                <div class="hint">请把它填到「设置 → CRL 分发点 URL」，Windows / strongSwan 才能在线校验证书吊销状态。</div>
+              </div>
+              <div id="pubNowResult"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>发布目标</h2>
+            <span class="muted small" id="pubDetected"></span>
+            <span class="spacer"></span>
+            <button class="btn btn-sm" type="button" data-act="pub-target-new">＋ 添加目标</button>
+            <button class="btn btn-sm" type="button" data-act="pub-suggest-add" id="pubSuggestAddBtn">一键添加勾选的建议目标</button>
+          </div>
+          <div class="card-body">
+            <div id="pubTargetTestResult"></div>
+            <div class="table-wrap" id="pubTargets"></div>
+            <div id="pubTargetFormWrap" hidden>
+              <div class="card rs-subcard">
+                <div class="card-head"><h2 id="pubTargetFormTitle">添加发布目标</h2></div>
+                <div class="card-body form-grid">
+                  <div class="field">
+                    <label for="pubTName">名称 *</label>
+                    <input id="pubTName" class="input" placeholder="例如 strongSwan swanctl — CRL (PEM)">
+                  </div>
+                  <div class="field">
+                    <label for="pubTPath">目标目录 / 命令 *</label>
+                    <input id="pubTPath" class="input mono" placeholder="/etc/swanctl/x509crl">
+                  </div>
+                  <div class="field">
+                    <label for="pubTFilename">文件名</label>
+                    <input id="pubTFilename" class="input mono" placeholder="ca.crl.pem（留空按内容与格式自动生成）">
+                  </div>
+                  <div class="field-row">
+                    <div class="field">
+                      <label for="pubTFormat">格式</label>
+                      <select id="pubTFormat" class="input">
+                        <option value="pem">PEM</option>
+                        <option value="der">DER</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="pubTContent">内容</label>
+                      <select id="pubTContent" class="input">
+                        <option value="crl">CRL 吊销列表</option>
+                        <option value="ca_cert">CA 证书</option>
+                        <option value="ca_chain">CA 证书链</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="pubTReload">reload 命令（可留空）</label>
+                    <input id="pubTReload" class="input mono" placeholder="swanctl --flush-certs && swanctl --load-creds && systemctl restart strongswan">
+                  </div>
+                  <div class="field-row">
+                    <div class="field">
+                      <label for="pubTMode">文件权限</label>
+                      <input id="pubTMode" class="input mono" value="0644">
+                    </div>
+                    <div class="field">
+                      <label for="pubTOwner">属主 user:group（可留空）</label>
+                      <input id="pubTOwner" class="input mono" placeholder="root:root">
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label class="check"><input type="checkbox" id="pubTEnabled" checked> 启用该目标</label>
+                  </div>
+                </div>
+                <div class="card-foot row">
+                  <button class="btn btn-primary" type="button" data-act="pub-target-save">保存目标</button>
+                  <button class="btn" type="button" data-act="pub-target-cancel">取消</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>建议目标（按本机检测结果）</h2></div>
+          <div class="card-body" id="pubSuggested"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>发布历史</h2></div>
+          <div class="card-body no-pad"><div class="table-wrap" id="pubLog"></div></div>
+          <div class="card-foot pager" id="pubLogPager"></div>
+        </div>
+      </section>
+
+      <!-- ---------------------------- 自动化 ---------------------------- -->
+      <section class="view" data-view="automation" hidden>
+        <div class="callout small" id="autoNote">
+          CRL / CA 向 strongSwan 目录落地由「CRL 自动发布」负责；本页用于扩展其它自动化（通知、归档、多网关分发…）。
+        </div>
+
+        <div class="toolbar">
+          <button class="btn btn-primary" type="button" data-act="au-new">＋ 新建任务</button>
+          <button class="btn" type="button" data-act="au-presets">安装预置示例</button>
+          <span class="spacer"></span>
+          <span class="muted small" id="autoStaging"></span>
+          <button class="btn btn-ghost" type="button" data-act="au-refresh">刷新</button>
+        </div>
+
+        <div id="autoFormWrap" hidden>
+          <div class="card">
+            <div class="card-head"><h2 id="autoFormTitle">新建自动化任务</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="autoName">任务名称 *</label>
+                <input id="autoName" class="input" placeholder="例如 证书被吊销时发送通知">
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="autoKind">动作类型 kind *</label>
+                  <select id="autoKind" class="input"></select>
+                </div>
+                <div class="field">
+                  <label for="autoTrigger">触发器 trigger *</label>
+                  <select id="autoTrigger" class="input"></select>
+                </div>
+              </div>
+              <div class="field">
+                <label for="autoContent">内容 content</label>
+                <select id="autoContent" class="input"></select>
+              </div>
+
+              <div class="field-row" id="autoTargetFile" hidden>
+                <div class="field">
+                  <label for="autoFilePath">目标目录 / 文件路径 *</label>
+                  <input id="autoFilePath" class="input mono" placeholder="/var/backups/ca/inventory">
+                </div>
+                <div class="field">
+                  <label for="autoTargetFilename">文件名</label>
+                  <input id="autoTargetFilename" class="input mono" placeholder="留空按内容自动生成">
+                </div>
+              </div>
+              <div class="field-row" id="autoTargetFileMode" hidden>
+                <div class="field">
+                  <label for="autoMode">文件权限</label>
+                  <input id="autoMode" class="input mono" value="0644">
+                </div>
+                <div class="field">
+                  <label for="autoOwner">属主 user:group（可留空）</label>
+                  <input id="autoOwner" class="input mono" placeholder="root:root">
+                </div>
+              </div>
+
+              <div class="field" id="autoTargetCommand" hidden>
+                <label for="autoCmd">要执行的命令 *</label>
+                <input id="autoCmd" class="input mono" placeholder="sh -c 'scp -q &quot;$CA_CONTENT_FILE&quot; root@gw2:/etc/swanctl/x509crl/'">
+                <div class="hint">可用环境变量：<span class="mono">CA_CONTENT_FILE</span>、<span class="mono">CA_CONTENT_SHA256</span>、<span class="mono">CA_CRL_NUMBER</span>、<span class="mono">CA_EVENT</span>。</div>
+              </div>
+
+              <div class="field" id="autoTargetWebhook" hidden>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="autoUrl">Webhook URL *</label>
+                    <input id="autoUrl" class="input mono" placeholder="https://example.com/ca-hook">
+                  </div>
+                  <div class="field">
+                    <label for="autoMethod">方法</label>
+                    <select id="autoMethod" class="input">
+                      <option value="POST">POST</option>
+                      <option value="PUT">PUT</option>
+                    </select>
+                  </div>
+                </div>
+                <label for="autoSecret">签名密钥 secret（可留空）</label>
+                <input id="autoSecret" class="input mono" placeholder="填写后会带 X-CA-Signature: sha256=&lt;HMAC&gt;">
+                <div class="hint">系统 POST JSON，并在填写 secret 时附带 <span class="mono">X-CA-Signature: sha256=&lt;HMAC-SHA256&gt;</span> 供对方校验。</div>
+              </div>
+
+              <div class="field" id="autoIntervalField" hidden>
+                <label for="autoInterval">执行间隔（分钟）*</label>
+                <input id="autoInterval" class="input" type="number" min="1" max="100000" value="60">
+              </div>
+              <div class="field" id="autoLeadField" hidden>
+                <label for="autoLead">CRL 到期前多少小时触发 *</label>
+                <input id="autoLead" class="input" type="number" min="1" max="8760" value="72">
+              </div>
+              <div class="field" id="autoCertIdField" hidden>
+                <label for="autoCertId">证书 ID *</label>
+                <input id="autoCertId" class="input mono" placeholder="内容为事件相关证书时必须填写">
+              </div>
+
+              <div class="field-row">
+                <div class="field">
+                  <label class="check"><input type="checkbox" id="autoEnabled" checked> 启用该任务</label>
+                </div>
+                <div class="field">
+                  <label class="check"><input type="checkbox" id="autoOnlyIfChanged" checked> 内容未变化时跳过（only_if_changed）</label>
+                </div>
+              </div>
+              <div class="field">
+                <label for="autoTaskNote">备注</label>
+                <textarea id="autoTaskNote" class="input" rows="2"></textarea>
+              </div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn btn-primary" type="button" data-act="au-save">保存任务</button>
+              <button class="btn" type="button" data-act="au-cancel">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="autoRunResult"></div>
+
+        <div class="card">
+          <div class="card-head"><h2>任务</h2></div>
+          <div class="card-body no-pad"><div class="table-wrap" id="autoTable"></div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>运行历史</h2>
+            <select id="autoLogTask" class="input" aria-label="按任务过滤"></select>
+            <button class="btn btn-sm btn-ghost" type="button" data-act="au-log-refresh">刷新</button>
+          </div>
+          <div class="card-body no-pad"><div class="table-wrap" id="autoLog"></div></div>
+          <div class="card-foot pager" id="autoLogPager"></div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 导入数据 -------------------------- -->
+      <section class="view" data-view="import" hidden>
+        <div class="tabs" id="importTabs">
+          <button class="tab active" type="button" data-import-tab="files">上传证书文件</button>
+          <button class="tab" type="button" data-import-tab="dir">从服务器目录导入</button>
+          <button class="tab" type="button" data-import-tab="csv">导入 CSV 元数据</button>
+        </div>
+
+        <!-- (a) 上传证书文件 -->
+        <div class="import-pane" data-import-pane="files">
+          <div class="card">
+            <div class="card-head"><h2>上传证书文件</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="impFiles">选择证书文件（.pem/.crt/.cer/.der，可多选或 zip）</label>
+                <input id="impFiles" class="input" type="file" multiple accept=".pem,.crt,.cer,.der,.zip">
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="impOwner">统一所有者（可空）</label>
+                  <input id="impOwner" class="input">
+                </div>
+                <div class="field">
+                  <label for="impTags">统一标签（逗号分隔）</label>
+                  <input id="impTags" class="input">
+                </div>
+              </div>
+              <div class="row wrap">
+                <label class="check"><input type="checkbox" id="impMarkRevoked"> 导入时标记为已吊销</label>
+                <select id="impRevokeReason" class="input" disabled>
+                  <option value="unspecified">unspecified</option>
+                  <option value="keyCompromise">keyCompromise</option>
+                  <option value="cACompromise">cACompromise</option>
+                  <option value="affiliationChanged">affiliationChanged</option>
+                  <option value="superseded">superseded</option>
+                  <option value="cessationOfOperation">cessationOfOperation</option>
+                  <option value="certificateHold">certificateHold</option>
+                  <option value="privilegeWithdrawn">privilegeWithdrawn</option>
+                </select>
+              </div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn" id="impFilesPrecheck" type="button">预检</button>
+              <button class="btn btn-primary" id="impFilesImport" type="button" disabled>确认导入</button>
+              <span class="muted small">预检不会写入数据。</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- (b) 服务器目录 -->
+        <div class="import-pane" data-import-pane="dir" hidden>
+          <div class="card">
+            <div class="card-head"><h2>从服务器目录导入</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="impDirPath">服务器目录绝对路径 *</label>
+                <input id="impDirPath" class="input mono" placeholder="/data/certs/incoming">
+              </div>
+              <div class="field">
+                <label for="impDirOwner">统一所有者（可空）</label>
+                <input id="impDirOwner" class="input">
+              </div>
+              <div class="row wrap">
+                <label class="check"><input type="checkbox" id="impDirMarkRevoked"> 导入时标记为已吊销</label>
+              </div>
+              <div class="callout small">服务器端仅读取该目录下的证书文件（.pem/.crt/.cer/.der），不会递归修改源文件。</div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn" id="impDirPrecheck" type="button">预检</button>
+              <button class="btn btn-primary" id="impDirImport" type="button" disabled>确认导入</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- (c) CSV -->
+        <div class="import-pane" data-import-pane="csv" hidden>
+          <div class="card">
+            <div class="card-head"><h2>导入 CSV 元数据</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="impCsvFile">CSV 文件</label>
+                <input id="impCsvFile" class="input" type="file" accept=".csv,text/csv">
+              </div>
+              <div class="field">
+                <label for="impCsvText">或粘贴 CSV 文本</label>
+                <textarea id="impCsvText" class="input mono" rows="8" placeholder="cn,serial_hex,owner,tags,notes"></textarea>
+              </div>
+              <div class="callout small">表头示例：<span class="mono">cn,serial_hex,owner,tags,notes</span>。CSV 元数据用于补充/更新已有证书的元信息，不会创建新证书。</div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn" id="impCsvPrecheck" type="button">预检</button>
+              <button class="btn btn-primary" id="impCsvImport" type="button" disabled>确认导入</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="impResultCard" hidden>
+          <div class="card-head"><h2>导入结果</h2><span class="badge" id="impResultStat"></span></div>
+          <div class="card-body" id="impResult"></div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 一致性体检 -------------------------- -->
+      <section class="view" data-view="consistency" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>一致性体检</h2>
+            <span class="muted small" id="consistencyLast">上次体检：—</span>
+          </div>
+          <div class="card-body">
+            <p class="muted">体检会检查证书与 CA 的匹配情况、CRL 覆盖情况、元数据缺失、重复序列号、私钥缺失等问题，并给出可修复项。</p>
+            <div class="row">
+              <button class="btn btn-primary" id="consCheckBtn" type="button">开始体检</button>
+              <button class="btn" id="consRepairAll" type="button" disabled>一键修复全部可修复项</button>
+            </div>
+            <div class="progress" id="consProgress" hidden><div class="progress-bar"></div><span>正在体检，请稍候…</span></div>
+          </div>
+        </div>
+
+        <div class="stat-grid" id="consSummary"></div>
+        <div id="consIssues"></div>
+      </section>
+
+      <!-- -------------------------- 审计日志 -------------------------- -->
+      <section class="view" data-view="audit" hidden>
+        <div class="toolbar">
+          <select id="auditAction" class="input" aria-label="操作类型筛选"><option value="">全部操作类型</option></select>
+          <input id="auditQ" class="input grow" type="search" placeholder="关键词（对象、操作人、详情）回车搜索">
+          <select id="auditPageSize" class="input" aria-label="每页条数">
+            <option value="20">每页 20</option>
+            <option value="50">每页 50</option>
+            <option value="100">每页 100</option>
+          </select>
+          <button class="btn btn-ghost" id="auditReset" type="button">重置</button>
+        </div>
+        <div class="card">
+          <div class="card-body no-pad"><div class="table-wrap" id="auditTable"></div></div>
+          <div class="card-foot pager" id="auditPager"></div>
+        </div>
+      </section>
+
+      <!-- -------------------------- CA 管理 -------------------------- -->
+      <section class="view" data-view="ca" hidden>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>当前 CA</h2></div>
+            <div class="card-body" id="caCurrent">
+              <div class="skeleton sk-line"></div>
+              <div class="skeleton sk-line short"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>导入 CA</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="caCertFile">CA 证书文件 *（.pem/.crt/.cer/.der）</label>
+                <input id="caCertFile" class="input" type="file" accept=".pem,.crt,.cer,.der">
+              </div>
+              <div class="field">
+                <label for="caKeyFile">CA 私钥文件（.key/.pem）</label>
+                <input id="caKeyFile" class="input" type="file" accept=".key,.pem">
+              </div>
+              <div class="field">
+                <label for="caChainFile">证书链文件（可选）</label>
+                <input id="caChainFile" class="input" type="file" accept=".pem,.crt,.cer">
+              </div>
+              <div class="field">
+                <label for="caKeyPassword">私钥口令（加密私钥必填）</label>
+                <input id="caKeyPassword" class="input" type="password" autocomplete="new-password">
+              </div>
+              <div class="callout small">
+                不导入私钥时仍可管理证书列表，但<strong>无法签发证书与生成 CRL</strong>。私钥仅保存在服务器端，前端不做持久化存储。
+              </div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn btn-primary" id="caImportBtn" type="button">导入 CA</button>
+              <button class="btn btn-ghost" id="caImportReset" type="button">清空</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>历史 CA</h2></div>
+          <div class="card-body no-pad"><div class="table-wrap" id="caHistory"></div></div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 设置 -------------------------- -->
+      <section class="view" data-view="settings" hidden>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>基本设置</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="setOrg">机构名称</label>
+                <input id="setOrg" class="input">
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="setValidity">默认有效期（天）</label>
+                  <input id="setValidity" class="input" type="number" min="1" max="3650">
+                </div>
+                <div class="field">
+                  <label for="setCrlValidity">CRL 有效期（天）</label>
+                  <input id="setCrlValidity" class="input" type="number" min="1" max="3650">
+                </div>
+              </div>
+              <div class="field">
+                <label for="setCrlUrl">CRL 分发点 URL</label>
+                <input id="setCrlUrl" class="input mono" placeholder="http://ca.example.com/crl/ca.crl">
+              </div>
+              <div class="field">
+                <label for="setVpnGateway">strongSwan 对端网关地址</label>
+                <input id="setVpnGateway" class="input mono" placeholder="vpn.example.com">
+                <div class="hint">VPN 客户端连接的对端网关地址，用于生成 strongSwan 配置片段与一键部署包。
+                  若保存后刷新未保留，请在生成片段时临时填写（当前设置接口未必持久化该字段）。</div>
+              </div>
+              <div class="field">
+                <label for="setDefaultRuleset">默认规则集</label>
+                <select id="setDefaultRuleset" class="input"><option value="">（未设置）</option></select>
+                <div class="hint">签发证书时默认使用的规则集，可在「规则集」页面详细编辑；保存后通过
+                  <span class="mono">POST /api/rulesets/default</span> 生效。</div>
+              </div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn btn-primary" id="setSaveBtn" type="button">保存设置</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>修改管理员密码</h2></div>
+            <div class="card-body form-grid">
+              <div class="field">
+                <label for="setOldPwd">旧密码 *</label>
+                <input id="setOldPwd" class="input" type="password" autocomplete="current-password">
+              </div>
+              <div class="field">
+                <label for="setNewPwd">新密码 *</label>
+                <input id="setNewPwd" class="input" type="password" autocomplete="new-password">
+                <div class="err" id="err-setNewPwd"></div>
+              </div>
+              <div class="field">
+                <label for="setNewPwd2">确认新密码 *</label>
+                <input id="setNewPwd2" class="input" type="password" autocomplete="new-password">
+                <div class="err" id="err-setNewPwd2"></div>
+              </div>
+            </div>
+            <div class="card-foot row">
+              <button class="btn btn-primary" id="setPwdBtn" type="button">修改密码</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>strongSwan 状态</h2>
+            <button class="btn btn-sm btn-ghost" type="button" data-act="ss-refresh">刷新</button>
+            <button class="btn btn-sm" type="button" data-act="ss-sync-script">下载同步脚本</button>
+          </div>
+          <div class="card-body" id="ssStatusBody">
+            <div class="skeleton sk-line"></div>
+            <div class="skeleton sk-line short"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>备份</h2>
+            <button class="btn btn-sm btn-ghost" id="backupRefresh" type="button">刷新列表</button>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <button class="btn btn-primary" id="backupCreate" type="button">一键备份</button>
+              <span class="muted small">备份包含数据库与 CA 材料，请妥善保管备份文件。</span>
+            </div>
+            <div class="table-wrap" id="backupList"></div>
+          </div>
+        </div>
+
+        <div class="card danger-zone">
+          <div class="card-head"><h2>恢复（危险）</h2></div>
+          <div class="card-body form-grid">
+            <div class="field">
+              <label for="restoreFile">备份文件 *</label>
+              <input id="restoreFile" class="input" type="file" accept=".db,.sqlite,.backup,.tar,.gz,.zip,.json">
+            </div>
+            <div class="callout callout-danger small">
+              恢复备份会<strong>覆盖当前全部数据</strong>（证书、CA、审计日志、设置）。恢复期间请勿进行其它操作，恢复后需重新登录。
+            </div>
+          </div>
+          <div class="card-foot row">
+            <button class="btn btn-danger" id="restoreBtn" type="button">恢复备份</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- -------------------------- 404 -------------------------- -->
+      <section class="view" data-view="notfound" hidden>
+        <div class="card"><div class="card-body">
+          <h2>页面不存在</h2>
+          <p class="muted">请从左侧导航选择功能。</p>
+          <a class="btn btn-primary" href="#/dashboard">返回概览</a>
+        </div></div>
+      </section>
+
+    </div><!-- /content -->
+  </main>
+</div><!-- /app -->
+
+<!-- ============================ 抽屉（证书详情用） ============================ -->
+<div class="drawer" id="drawer" hidden>
+  <div class="drawer-mask" data-drawer-close></div>
+  <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <div class="drawer-head">
+      <h2 id="drawerTitle">详情</h2>
+      <button class="btn btn-ghost btn-icon" type="button" data-drawer-close aria-label="关闭">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-foot" id="drawerFoot"></div>
+  </div>
+</div>
+
+<!-- ============================ 通用确认对话框 ============================ -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-mask" data-modal-close></div>
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h2 id="modalTitle">确认操作</h2>
+      <button class="btn btn-ghost btn-icon" type="button" data-modal-close aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="loading-overlay" id="loading" hidden><div class="spinner"></div><span id="loadingText">处理中…</span></div>
+
+<script src="vendor/tweetnacl.min.js"></script>
+<script src="crypto.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
